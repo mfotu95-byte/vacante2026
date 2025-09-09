@@ -4,16 +4,16 @@ from io import BytesIO
 from datetime import datetime
 
 st.set_page_config(page_title="Planner Zile Libere 2026", layout="centered")
-st.title("🗓️ Planner Zile Libere & Vacanțe – România 2026 (interactiv)")
+st.title("🗓️ Planner Zile Libere & Vacanțe – România 2026 (interactiv, CO)")
 
 # ----------------------------
 #  CONFIG & STATE
 # ----------------------------
 if "personal_days" not in st.session_state:
-    st.session_state.personal_days = []  # list of dicts: {"Data":"2026-xx-xx","Motiv":"..."}
+    st.session_state.personal_days = []  # {"Data":"2026-xx-xx","Motiv":"..."}
 
 if "custom_vacations" not in st.session_state:
-    st.session_state.custom_vacations = []  # list of dicts: {"Start":"2026-..","Stop":"2026-..","Descriere":"...","PTO":N}
+    st.session_state.custom_vacations = []  # {"Start":"2026-..","Stop":"2026-..","Descriere":"...","Zile_CO":N}
 
 # Zile libere legale 2026
 HOLIDAYS_2026 = [
@@ -35,7 +35,18 @@ HOLIDAYS_2026 = [
     ("2026-12-25","Crăciun – prima zi"),
     ("2026-12-26","Crăciun – a doua zi"),
 ]
+
 WEEKDAY_RO = {0:"Luni",1:"Marți",2:"Miercuri",3:"Joi",4:"Vineri",5:"Sâmbătă",6:"Duminică"}
+LUNI_RO = {
+    1: "Ianuarie", 2: "Februarie", 3: "Martie", 4: "Aprilie",
+    5: "Mai", 6: "Iunie", 7: "Iulie", 8: "August",
+    9: "Septembrie", 10: "Octombrie", 11: "Noiembrie", 12: "Decembrie"
+}
+
+def format_data_ro(dt: pd.Timestamp) -> str:
+    if isinstance(dt, str):
+        dt = pd.to_datetime(dt)
+    return f"{dt.day} {LUNI_RO[dt.month]}"
 
 def holidays_df():
     df = pd.DataFrame(HOLIDAYS_2026, columns=["Data","Sărbătoare"])
@@ -47,22 +58,24 @@ DF_H = holidays_df()
 HOLIDAY_DATES = set(DF_H["Data"].dt.date)
 
 # ----------------------------
-#  SIDEBAR – PTO & INFO
+#  SIDEBAR – CO & INFO
 # ----------------------------
 st.sidebar.header("⚙️ Setări")
-pto_total = st.sidebar.number_input("Zile concediu disponibile (PTO)", 0, 60, 22, 1)
+co_total = st.sidebar.number_input("Zile concediu de odihnă (CO) disponibile", 0, 60, 22, 1)
 st.sidebar.caption("Poți schimba numărul oricând; rezumatul se actualizează automat.")
 
 # ----------------------------
 #  SECTIUNEA 1 – ZILE LIBERE LEGALE
 # ----------------------------
 st.subheader("🥳 Zile libere legale 2026")
-st.dataframe(DF_H, use_container_width=True)
+DF_H_SHOW = DF_H.copy()
+DF_H_SHOW["Data"] = DF_H_SHOW["Data"].apply(format_data_ro)
+st.dataframe(DF_H_SHOW, use_container_width=True)
 
 # ----------------------------
-#  SECTIUNEA 2 – ZILE LIBERE PERSONALE (CUSTOM)
+#  SECTIUNEA 2 – ZILE LIBERE PERSONALE (nu consumă CO)
 # ----------------------------
-st.subheader("➕ Zile libere personale (nu consumă PTO)")
+st.subheader("➕ Zile libere personale (nu consumă CO)")
 with st.expander("Adaugă/editează zile personale"):
     col1, col2, col3 = st.columns([1,2,1])
     with col1:
@@ -76,17 +89,33 @@ with st.expander("Adaugă/editează zile personale"):
             else:
                 st.warning("Alege o dată pentru ziua personală.")
 
-    # editor pentru șters/modificat
     df_personal = pd.DataFrame(st.session_state.personal_days)
     if not df_personal.empty:
+        # coloană formatată pentru afișare
+        df_personal_display = df_personal.copy()
+        df_personal_display["Data"] = df_personal_display["Data"].apply(lambda s: format_data_ro(pd.to_datetime(s)))
         edited = st.data_editor(
-            df_personal,
+            df_personal_display,
             use_container_width=True,
             num_rows="dynamic",
             key="editor_personal_days"
         )
-        # salvează direct modificările
-        st.session_state.personal_days = edited.to_dict(orient="records")
+        # mapăm înapoi la ISO pentru state (păstrăm formatul intern robust)
+        edited_iso = edited.copy()
+        edited_iso["Data"] = pd.to_datetime(edited_iso["Data"].apply(
+            lambda x: pd.to_datetime(x, format="%d %B", errors="coerce")
+        ), errors="coerce").apply(
+            lambda dt: dt.replace(year=2026) if pd.notnull(dt) else None
+        )
+        # dacă parsarea e problematică, păstrăm valorile vechi
+        try:
+            st.session_state.personal_days = [
+                {"Data": d.isoformat()[:10], "Motiv": m}
+                for d, m in zip(edited_iso["Data"], edited_iso["Motiv"])
+                if pd.notnull(d)
+            ]
+        except Exception:
+            pass
     else:
         st.info("Nu ai adăugat încă zile personale.")
 
@@ -97,37 +126,34 @@ PERSONAL_DATES = { datetime.fromisoformat(r["Data"]).date() for r in st.session_
 # ----------------------------
 st.subheader("🧩 Propuneri de mini-vacanțe (bifează ce vrei să păstrezi)")
 proposals = [
-    {"Interval":"2026-01-01 → 2026-01-07","Zile_PTO":1,"Detalii":"PTO: 2026-01-05 (luni)","Motiv":"Leagă 1-2 ian + weekend + 6-7 ian","Idee":"City break / munte","Include":True},
-    {"Interval":"2026-04-09 → 2026-04-14","Zile_PTO":2,"Detalii":"PTO: 2026-04-09 (joi), 2026-04-14 (marți)","Motiv":"Vinerea Mare + Paște + Lunea Paștelui","Idee":"Maramureș/Bucovina sau Lisabona","Include":True},
-    {"Interval":"2026-04-30 → 2026-05-03","Zile_PTO":1,"Detalii":"PTO: 2026-04-30 (joi)","Motiv":"Ziua Muncii (vineri) + weekend","Idee":"Marea/Delta; Napoli & Amalfi","Include":True},
-    {"Interval":"2026-05-30 → 2026-06-02","Zile_PTO":1,"Detalii":"PTO: 2026-06-02 (marți)","Motiv":"Rusalii (duminică) + Lunea Rusaliilor & 1 Iunie","Idee":"City break nordic","Include":True},
-    {"Interval":"2026-08-14 → 2026-08-16","Zile_PTO":1,"Detalii":"PTO: 2026-08-14 (vineri)","Motiv":"Sf. Maria e sâmbătă — mini-vacanță","Idee":"Mare / Thassos","Include":False},
-    {"Interval":"2026-11-27 → 2026-12-02","Zile_PTO":2,"Detalii":"PTO: 2026-11-27 (vineri), 2026-12-02 (miercuri)","Motiv":"Sf. Andrei (luni) + Ziua Națională (marți)","Idee":"Târguri de Crăciun","Include":True},
-    {"Interval":"2026-12-24 → 2026-12-27","Zile_PTO":1,"Detalii":"PTO: 2026-12-24 (joi)","Motiv":"Crăciun (vineri & sâmbătă) + duminică","Idee":"Acasă / city break apropiat","Include":False},
+    {"Interval":"2026-01-01 → 2026-01-07","Zile_CO":1,"Detalii":"CO: 5 Ianuarie (luni)","Motiv":"Leagă 1-2 ian + weekend + 6-7 ian","Idee":"City break / munte","Include":True},
+    {"Interval":"2026-04-09 → 2026-04-14","Zile_CO":2,"Detalii":"CO: 9 Aprilie (joi), 14 Aprilie (marți)","Motiv":"Vinerea Mare + Paște + Lunea Paștelui","Idee":"Maramureș/Bucovina sau Lisabona","Include":True},
+    {"Interval":"2026-04-30 → 2026-05-03","Zile_CO":1,"Detalii":"CO: 30 Aprilie (joi)","Motiv":"Ziua Muncii (vineri) + weekend","Idee":"Marea/Delta; Napoli & Amalfi","Include":True},
+    {"Interval":"2026-05-30 → 2026-06-02","Zile_CO":1,"Detalii":"CO: 2 Iunie (marți)","Motiv":"Rusalii (duminică) + Lunea Rusaliilor & 1 Iunie","Idee":"City break nordic","Include":True},
+    {"Interval":"2026-08-14 → 2026-08-16","Zile_CO":1,"Detalii":"CO: 14 August (vineri)","Motiv":"Sf. Maria e sâmbătă — mini-vacanță","Idee":"Mare / Thassos","Include":False},
+    {"Interval":"2026-11-27 → 2026-12-02","Zile_CO":2,"Detalii":"CO: 27 Noiembrie (vineri), 2 Decembrie (miercuri)","Motiv":"Sf. Andrei (luni) + Ziua Națională (marți)","Idee":"Târguri de Crăciun","Include":True},
+    {"Interval":"2026-12-24 → 2026-12-27","Zile_CO":1,"Detalii":"CO: 24 Decembrie (joi)","Motiv":"Crăciun (vineri & sâmbătă) + duminică","Idee":"Acasă / city break apropiat","Include":False},
 ]
 df_prop = pd.DataFrame(proposals)
 df_prop_edit = st.data_editor(
     df_prop,
-    column_config={
-        "Include": st.column_config.CheckboxColumn("Include"),
-    },
+    column_config={"Include": st.column_config.CheckboxColumn("Include")},
     hide_index=True,
     use_container_width=True,
     key="editor_proposals"
 )
-pto_from_props = int(df_prop_edit.loc[df_prop_edit["Include"], "Zile_PTO"].sum())
+co_from_props = int(df_prop_edit.loc[df_prop_edit["Include"], "Zile_CO"].sum())
 
 # ----------------------------
-#  SECTIUNEA 4 – CONCEDIILE TALE (CUSTOM)
+#  SECTIUNEA 4 – CONCEDIILE TALE (INTERVALE CUSTOM)
 # ----------------------------
 st.subheader("✍️ Concediile tale (intervale custom)")
 
-def working_days_pto(start_date, end_date):
-    """Calculează zile PTO între două date: luni-vineri, excludem sărbătorile legale + zilele personale."""
+def working_days_co(start_date, end_date):
+    """Calculează zile CO (luni–vineri), excluzând sărbătorile legale și zilele personale."""
     if start_date > end_date:
         start_date, end_date = end_date, start_date
     rng = pd.bdate_range(start=start_date, end=end_date, freq="C")  # business days
-    # remove legal holidays and personal days that fall on weekdays
     count = 0
     for dts in rng:
         d = dts.date()
@@ -146,75 +172,59 @@ with st.form("add_custom_vacation", clear_on_submit=True):
     submitted = st.form_submit_button("Adaugă interval")
     if submitted:
         if start and stop:
-            pto_days = working_days_pto(start, stop)
+            zile_co = working_days_co(start, stop)
             st.session_state.custom_vacations.append({
                 "Start": str(start),
                 "Stop": str(stop),
                 "Descriere": descr,
-                "Zile_PTO": int(pto_days)
+                "Zile_CO": int(zile_co)
             })
         else:
             st.warning("Alege atât data de start, cât și data de stop.")
 
 df_custom = pd.DataFrame(st.session_state.custom_vacations)
 if not df_custom.empty:
+    # versiune de afișare cu date formate „12 Ianuarie”
+    df_custom_display = df_custom.copy()
+    df_custom_display["Start"] = df_custom_display["Start"].apply(lambda s: format_data_ro(pd.to_datetime(s)))
+    df_custom_display["Stop"] = df_custom_display["Stop"].apply(lambda s: format_data_ro(pd.to_datetime(s)))
     edited_custom = st.data_editor(
-        df_custom,
+        df_custom_display,
         use_container_width=True,
         num_rows="dynamic",
         key="editor_custom_vac"
     )
-    st.session_state.custom_vacations = edited_custom.to_dict(orient="records")
-    pto_from_custom = int(edited_custom["Zile_PTO"].sum())
+    # păstrăm în state varianta ISO (pentru calcule)
+    try:
+        def parse_ro_date_to_iso(x):
+            # primim "12 Ianuarie" -> facem 2026-01-12
+            dt = pd.to_datetime(x, format="%d %B", errors="coerce")
+            if pd.isnull(dt):
+                return None
+            return dt.replace(year=2026)
+
+        start_iso = edited_custom["Start"].apply(parse_ro_date_to_iso)
+        stop_iso = edited_custom["Stop"].apply(parse_ro_date_to_iso)
+
+        st.session_state.custom_vacations = []
+        for s, e, dsc, zco in zip(start_iso, stop_iso, edited_custom.get("Descriere",""), edited_custom.get("Zile_CO", 0)):
+            if pd.notnull(s) and pd.notnull(e):
+                st.session_state.custom_vacations.append({
+                    "Start": s.isoformat()[:10],
+                    "Stop": e.isoformat()[:10],
+                    "Descriere": dsc,
+                    "Zile_CO": int(zco) if pd.notnull(zco) else 0
+                })
+    except Exception:
+        pass
+    co_from_custom = int(pd.DataFrame(st.session_state.custom_vacations)["Zile_CO"].sum()) if st.session_state.custom_vacations else 0
 else:
     st.info("Nu ai adăugat încă intervale custom.")
-    pto_from_custom = 0
+    co_from_custom = 0
 
 # ----------------------------
-#  REZUMAT PTO
+#  REZUMAT CO
 # ----------------------------
-pto_planned = pto_from_props + pto_from_custom
-pto_left = max(0, int(pto_total - pto_planned))
-st.info(f"🔢 PTO planificat: {pto_planned} zile • PTO rămas: {pto_left} zile (din {pto_total})")
-
-# ----------------------------
-#  EXPORT EXCEL
-# ----------------------------
-summary_df = pd.DataFrame([
-    {"Indicator":"Total PTO disponibil","Valoare":pto_total},
-    {"Indicator":"PTO din propuneri selectate","Valoare":pto_from_props},
-    {"Indicator":"PTO din intervale custom","Valoare":pto_from_custom},
-    {"Indicator":"PTO rămas","Valoare":pto_left},
-])
-
-def to_excel_bytes(df_h, df_prop_sel, df_personal, df_custom, df_summary):
-    try:
-        import openpyxl  # ensure dependency
-    except Exception:
-        st.error("Lipsește 'openpyxl' în requirements.txt.")
-        return None
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df_h.to_excel(writer, sheet_name="Zile libere 2026", index=False)
-        df_prop_sel.to_excel(writer, sheet_name="Propuneri selectate", index=False)
-        df_personal.to_excel(writer, sheet_name="Zile personale", index=False)
-        df_custom.to_excel(writer, sheet_name="Concedii custom", index=False)
-        df_summary.to_excel(writer, sheet_name="Rezumat PTO", index=False)
-    return output.getvalue()
-
-selected_props = df_prop_edit[df_prop_edit["Include"]].copy()
-selected_props = selected_props.drop(columns=["Include"])
-
-df_personal_export = pd.DataFrame(st.session_state.personal_days) if st.session_state.personal_days else pd.DataFrame(columns=["Data","Motiv"])
-df_custom_export = pd.DataFrame(st.session_state.custom_vacations) if st.session_state.custom_vacations else pd.DataFrame(columns=["Start","Stop","Descriere","Zile_PTO"])
-
-excel_bytes = to_excel_bytes(DF_H, selected_props, df_personal_export, df_custom_export, summary_df)
-st.download_button(
-    label="⬇️ Descarcă Excel (toate foile)",
-    data=excel_bytes,
-    file_name="Planner_2026_PTO_si_Vacante.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    disabled=(excel_bytes is None),
-)
-
-
+co_planned = co_from_props + co_from_custom
+co_left = max(0, int(co_total - co_planned))
+st.info(f"🔢 CO planificat: {co_planned} zile • CO rămas: {co_left} zile (din {co_total})")
