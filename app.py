@@ -4,7 +4,7 @@ from io import BytesIO
 from datetime import datetime
 
 st.set_page_config(page_title="Planner Zile Libere 2026", layout="centered")
-st.title("🗓️ Planner Zile Libere & Vacanțe – România 2026 (interactiv, CO)")
+st.title("🗓️ Planner Vacanțe – 2026")
 
 # ----------------------------
 #  STATE
@@ -205,3 +205,4 @@ else:
 co_planned = co_from_props + co_from_custom
 co_left = max(0, int(co_total - co_planned))
 st.info(f"🔢 CO planificat: {co_planned} zile • CO rămas: {co_left} zile (din {co_total})")
+
